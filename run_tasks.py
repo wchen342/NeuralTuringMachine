@@ -121,6 +121,7 @@ def run_train_step(inputs, labels, seq_len):
         output_logits, outputs = model(inputs, seq_len)
         loss = model.loss(labels, output_logits)
     gradients = tape.gradient(loss, model.trainable_variables)
+    gradients, _ = tf.clip_by_global_norm(gradients, args.max_grad_norm)
     model.optimizer.apply_gradients(zip(gradients, model.trainable_variables))
 
     return loss, outputs
