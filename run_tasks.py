@@ -91,7 +91,7 @@ class BuildModel(keras.Model):
             stateful=False, unroll=True)
 
         if args.task in ('copy', 'associative_recall'):
-            self.loss = keras.losses.BinaryCrossentropy(from_logits=True)
+            self.loss = keras.losses.BinaryCrossentropy(reduction=tf.losses.Reduction.NONE)
 
         if args.optimizer == 'RMSProp':
             self.optimizer = tf.optimizers.RMSPropOptimizer(args.learning_rate, rho=0.9, decay=0.9)
@@ -104,9 +104,8 @@ class BuildModel(keras.Model):
             output_logits = output_sequence[:, max_seq_len + 1:, :]
         elif args.task == 'associative_recall':
             output_logits = output_sequence[:, 3 * (max_seq_len + 1) + 2:, :]
-        if args.task in ('copy', 'associative_recall'):
-            outputs = tf.sigmoid(output_logits)
-        return output_logits, outputs
+        outputs = tf.sigmoid(output_logits)
+        return outputs
 
 
 model = BuildModel()
@@ -118,8 +117,10 @@ def run_train_step(inputs, labels, seq_len):
     inputs = tf.cast(inputs, tf.float32)
     labels = tf.cast(labels, tf.float32)
     with tf.GradientTape() as tape:
-        output_logits, outputs = model(inputs, seq_len)
-        loss = model.loss(labels, output_logits)
+        outputs = model(inputs, seq_len)
+        # Keras's binary cross-entropy does an unexpected mean over last dimension
+        loss = model.loss(labels[..., tf.newaxis], outputs[..., tf.newaxis])
+        loss = tf.reduce_sum(loss) / inputs.shape[0]
     gradients = tape.gradient(loss, model.trainable_variables)
     gradients, _ = tf.clip_by_global_norm(gradients, args.max_grad_norm)
     model.optimizer.apply_gradients(zip(gradients, model.trainable_variables))
@@ -132,8 +133,9 @@ def run_eval_step(inputs, labels, seq_len):
     # Cast data type
     inputs = tf.cast(inputs, tf.float32)
     labels = tf.cast(labels, tf.float32)
-    output_logits, outputs = model(inputs, seq_len)
-    loss = model.loss(labels, output_logits)
+    outputs = model(inputs, seq_len)
+    loss = model.loss(labels[..., tf.newaxis], outputs[..., tf.newaxis])
+    loss = tf.reduce_sum(loss) / inputs.shape[0]
 
     return loss, outputs
 
